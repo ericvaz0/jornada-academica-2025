@@ -12,15 +12,36 @@ import plotly.graph_objects as go
 
 #A Mobius transformation is a transformation of the form f(z) = (az + b)/(cz + d), where a, b, c, d are complex numbers and ad - bc != 0.
 #Equivalentely, a Mobius transformation can be represented by a 2x2 matrix [[a, b], [c, d]] acting on the complex projective line.
-#Mobius transformations map generalized circles to generalized circles, and mutually tangent generalized circles remain tangent after the transformation.
+#An anti-conformal transformation is a transformation of the form g(z) = f(\bar{z}), where f is a Mobius transformation.
+#A generalized Mobius transformation is either a Mobius transformation or an anti-conformal transformation.
+#This can be represented by a 2x2 matrix [[a, b], [c, d]] augmented with a parity flag, which is True if the transformation is anti-conformal.
+#Generalized Mobius transformations map generalized circles to generalized circles, and mutually tangent generalized circles remain tangent after the transformation.
 #Two lines are said to be tangent if they are parallel.
 
+class array_with_parity:
+    def __init__(self, array, parity = False):
+        self.array = array
+        self.parity = parity
+
+    def dot(self, other):
+        if self.parity:
+            array = array_with_parity(self.array @ np.conjugate(other.array), self.parity ^ other.parity)
+        else:
+            array = array_with_parity(self.array @ other.array, self.parity ^ other.parity)
+        return array
+    
+    def getI(self):
+        if self.parity:
+            array = array_with_parity(np.conjugate(np.linalg.inv(self.array)), self.parity)
+        else:
+            array = array_with_parity(np.linalg.inv(self.array), self.parity)
+        return array
 
 #FUNCTIONS:
 #All of the plotting functions use the Plotly library and take a figure object (fig) as an argument.
 
 #Plots a circle with a given radius and center. If plot_center is True, the center is also plotted.
-def plot_circle(radius, center_x, center_y, fig, plot_center=True):
+def plot_circle(radius, center_x, center_y, fig, plot_center=False):
     # Create the circle
     theta = np.linspace(0, 2*np.pi, 100)
     x = radius*np.cos(theta) + center_x
@@ -47,7 +68,7 @@ def plot_point(z, fig):
     fig.add_trace(go.Scatter(x=[np.real(z)], y=[np.imag(z)], mode='markers', marker_color='red'))
 
 #Plots a generalized circle. If force_line is True, the circle is plotted as a line even if it is a true circle.
-def plot_generalized_circle(circle, fig, force_line=False, plot_center=True):
+def plot_generalized_circle(circle, fig, force_line=False, plot_center=False):
     if(np.abs(circle[0,0]) >= 1e-10 and not force_line):
         center = -circle[1,0]/circle[0,0]
         radius = np.sqrt(np.abs(center)**2 - np.real(circle[1,1]/circle[0,0]))
@@ -60,7 +81,13 @@ def plot_generalized_circle(circle, fig, force_line=False, plot_center=True):
 
 #Applies (the inverse of) a Mobius transformation to a generalized circle and puts the result in the canonical form.
 #If force_line is True, the circle it put into the canonical form of a line (|b| = 1), even if |a| > 0.
-def mobius_transform_circle(circle, matrix, force_line=False):
+def mobius_transform_circle(circle_, matrix_with_parity, force_line=False):
+    if(matrix_with_parity.parity):
+        matrix = np.conjugate(matrix_with_parity.array)
+        circle = np.conjugate(circle_)
+    else:
+        matrix = matrix_with_parity.array
+        circle = circle_
     circle_new = (matrix.T @ circle) @ np.conjugate(matrix)
     if(np.abs(circle_new[0,0]) >= 1e-10 and not force_line):
         circle_new = circle_new/circle_new[0,0]
@@ -71,7 +98,12 @@ def mobius_transform_circle(circle, matrix, force_line=False):
     return circle_new
 
 #Applies a Mobius transformation to a point.
-def mobius_transform_point(z, matrix):
+def mobius_transform_point(z_, matrix_with_parity):
+    if(matrix_with_parity.parity):
+        z = np.conjugate(z_)
+    else:
+        z = z_
+    matrix = matrix_with_parity.array
     return (matrix[0,0]*z+matrix[0,1])/(matrix[1,0]*z+matrix[1,1])
 
 #Finds the point of tangency of two circles. If the circles are tangent at infinity, the function returns np.inf.
@@ -91,8 +123,9 @@ def point_of_tangency(circle_1, circle_2):
     circle = circle/circle[0,0]
     line = line/np.abs(line[0,1])
     matrix = np.array([[1/line[0,1], -circle[1,0]], [0, 1]], dtype=complex)
-    new_line = mobius_transform_circle(line, matrix)
-    intersect = mobius_transform_point(-new_line[1,1]/2, matrix)
+    matrix_with_parity = array_with_parity(matrix, False)
+    new_line = mobius_transform_circle(line, matrix_with_parity)
+    intersect = mobius_transform_point(-new_line[1,1]/2, matrix_with_parity)
 
     return intersect
 
@@ -120,16 +153,17 @@ def circle_from_line(a,b,c):
     return np.array([[0, a/2 - (b/2)*1j], [a/2 + (b/2)*1j, c]], dtype=complex)
 
 #Finds the unique two circles that are tangent to three mutually tangent circles.
+#Returns one of the circles and the Mobius transformation that maps it to the other circle, while preserving the other three circles.
 def descartes_circles(circle_1, circle_2, circle_3):
     kiss_point = point_of_tangency(circle_1, circle_2)
 
-    matrix_1 = np.array([[kiss_point, 1], [1, 0]], dtype=complex)
+    matrix_1 = array_with_parity(np.array([[kiss_point, 1], [1, 0]], dtype=complex))
 
     line_1 = mobius_transform_circle(circle_1, matrix_1, force_line=True)
     line_2 = mobius_transform_circle(circle_2, matrix_1, force_line=True)
     circle = mobius_transform_circle(circle_3, matrix_1)
 
-    matrix_2 = np.array([[1/line_1[0,1], -circle[1,0]], [0, 1]], dtype=complex)
+    matrix_2 = array_with_parity(np.array([[1/line_1[0,1], -circle[1,0]], [0, 1]], dtype=complex))
 
     circle = mobius_transform_circle(circle, matrix_2)
     line_1 = mobius_transform_circle(line_1, matrix_2, force_line=True)
@@ -140,28 +174,63 @@ def descartes_circles(circle_1, circle_2, circle_3):
     new_circle_1 = circle_from_center_and_radius(2*radius*1j, radius)
     new_circle_2 = circle_from_center_and_radius(-2*radius*1j, radius)
 
-    inverse_matrix = np.linalg.inv(matrix_1 @ matrix_2)
-    return mobius_transform_circle(new_circle_1, inverse_matrix), mobius_transform_circle(new_circle_2, inverse_matrix)
+    matrix = matrix_1.dot(matrix_2)
+    inverse_matrix = (matrix).getI()
+    conjugate = array_with_parity(np.array([[1,0],[0,1]], dtype = complex), True)
+
+
+    new_circle_1 = mobius_transform_circle(new_circle_1, inverse_matrix)
+    return new_circle_1, matrix.dot(conjugate.dot(inverse_matrix))
 
 
 #EXAMPLE:
-z_1 = -5.71-0.27j
-z_2 = -3.05-1.65j
-z_3 = -3.97+2.65j
+z_1 = 1
+z_2 = -1
+z_3 = np.sqrt(3)*1j
 r_1 = 1
-r_2 = 2
-r_3 = 2.4
+r_2 = 1
+r_3 = 1
 
 circle_1 = np.array([[1, -np.conj(z_1)], [-z_1, np.abs(z_1)**2 - r_1**2]], dtype=complex)
 circle_2 = np.array([[1, -np.conj(z_2)], [-z_2, np.abs(z_2)**2 - r_2**2]], dtype=complex)
 circle_3 = np.array([[1, -np.conj(z_3)], [-z_3, np.abs(z_3)**2 - r_3**2]], dtype=complex)
+circle_4, inversion_1 = descartes_circles(circle_1, circle_2, circle_3)
 
-new_circle_1, new_circle_2 = descartes_circles(circle_1, circle_2, circle_3)
-fig = go.Figure()
-fig.update_layout(xaxis_range=[-10, 10], yaxis_range=[-10, 10])
-plot_generalized_circle(circle_1, fig)
-plot_generalized_circle(circle_2, fig)
-plot_generalized_circle(circle_3, fig)
-plot_generalized_circle(new_circle_1, fig, plot_center=False)
-plot_generalized_circle(new_circle_2, fig, plot_center=False)
-fig.show()
+_, inversion_2 = descartes_circles(circle_1, circle_2, circle_4)
+_, inversion_3 = descartes_circles(circle_1, circle_3, circle_4)
+_, inversion_4 = descartes_circles(circle_2, circle_3, circle_4)
+
+inversions = [inversion_1, inversion_2, inversion_3, inversion_4]
+
+generation_0 = [circle_1, circle_2, circle_3, circle_4]
+gasket = [generation_0]
+generations = 5
+counter = 4
+
+for i in range(0, generations):
+    new_generation = []
+    generation = gasket[i]
+    for i in range(0, len(generation)):
+        index = i % 4
+        new_generation.append(mobius_transform_circle(generation[i], inversions[(index+1)%4]))
+        new_generation.append(mobius_transform_circle(generation[i], inversions[(index+2)%4]))
+        new_generation.append(mobius_transform_circle(generation[i], inversions[(index+3)%4]))
+        counter += 3
+    gasket.append(new_generation)
+
+for i in range(0, generations-1):
+    for j in range(i, generations):
+        for k in range(0, len(gasket[i])):
+            for l in range(0, len(gasket[j])):
+                circle_1 = gasket[i][k]
+                circle_2 = gasket[j][l]
+                distance = np.abs(circle_1[0,0] - circle_2[0,0]) + np.abs(circle_1[1,0] - circle_2[1,0]) + np.abs(circle_1[1,1] - circle_2[1,1])
+                if(distance < 1e-10):
+                    print("Repeated circle: " + str(i) + ", " + str(j) + ", " + str(k) + ", " + str(l))
+
+print("Number of circles: " + str(counter))
+#fig = go.Figure()
+#for generation in gasket:
+#    for circle in generation:
+#        plot_generalized_circle(circle, fig)
+#fig.show()
